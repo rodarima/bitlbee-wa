@@ -51,12 +51,14 @@ static wabee_t *
 wabee_new(account_t *a)
 {
 	wabee_t *wb = g_new0(wabee_t, 1);
+	cb_t *cb = g_new0(cb_t, 1);
 
-	wb->wa = wa_init();
+	cb->ptr = wb;
+	cb->priv_msg = cb_priv_msg;
+	cb->update_user = cb_update_user;
+
+	wb->wa = wa_init(cb);
 	wb->ic = imcb_new(a);
-
-	wa_cb_priv_msg(wb->wa, (void *)wb, cb_priv_msg);
-	wa_cb_update_user(wb->wa, (void *)wb, cb_update_user);
 
 	return wb;
 }
