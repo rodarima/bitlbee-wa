@@ -34,6 +34,7 @@ event_add(wabee_t *wb, enum event type, void *data);
 static int
 cb_priv_msg(void *ptr, priv_msg_t *pm)
 {
+	fprintf(stderr, "queuing: user %s wrote: %s\n", pm->from->jid, pm->text);
 	return event_add(ptr, EVENT_PRIV_MSG, pm);
 }
 
@@ -46,9 +47,19 @@ cb_update_user(void *ptr, user_t *u)
 static int
 handle_priv_msg(wabee_t *wb, priv_msg_t *pm)
 {
-	assert(pm->from);
-	assert(pm->from->jid);
-	assert(pm->text);
+	if(!(pm->from) || !(pm->from->jid))
+	{
+		fprintf(stderr, "No recipient received, ignoring msg\n");
+		return 0;
+	}
+
+	if(!pm->text)
+	{
+		fprintf(stderr, "No text received, ignoring msg\n");
+		return 0;
+	}
+
+	fprintf(stderr, "User %s wrote: %s\n", pm->from->jid, pm->text);
 
 	imcb_buddy_msg(wb->ic, pm->from->jid, pm->text, 0, 0);
 
