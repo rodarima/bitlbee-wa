@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <wordexp.h>
 
 typedef struct im_connection im_connection_t;
 
@@ -14,6 +15,8 @@ typedef struct {
 	pthread_t thread;
 	int pipe[2];
 	GAsyncQueue *q;
+	const char *config_dir;
+	int run;
 } wabee_t;
 
 enum event {
@@ -34,7 +37,7 @@ event_add(wabee_t *wb, enum event type, void *data);
 static int
 cb_priv_msg(void *ptr, priv_msg_t *pm)
 {
-	fprintf(stderr, "queuing: user %s wrote: %s\n", pm->from->jid, pm->text);
+	fprintf(stderr, "queuing: user %s wrote: %s\n", pm->jid, pm->text);
 	return event_add(ptr, EVENT_PRIV_MSG, pm);
 }
 
@@ -47,7 +50,9 @@ cb_update_user(void *ptr, user_t *u)
 static int
 handle_priv_msg(wabee_t *wb, priv_msg_t *pm)
 {
-	if(!(pm->from) || !(pm->from->jid))
+	int opt = 0;
+
+	if(!pm->jid)
 	{
 		fprintf(stderr, "No recipient received, ignoring msg\n");
 		return 0;
@@ -59,9 +64,12 @@ handle_priv_msg(wabee_t *wb, priv_msg_t *pm)
 		return 0;
 	}
 
-	fprintf(stderr, "User %s wrote: %s\n", pm->from->jid, pm->text);
+	fprintf(stderr, "User %s wrote: %s\n", pm->jid, pm->text);
 
-	imcb_buddy_msg(wb->ic, pm->from->jid, pm->text, 0, 0);
+	if(pm->from_me)
+		opt |= OPT_SELFMESSAGE;
+
+	imcb_buddy_msg(wb->ic, pm->jid, pm->text, opt, 0);
 
 	g_free(pm);
 
@@ -75,7 +83,7 @@ handle_update_user(wabee_t *wb, user_t *u)
 
 	assert(u);
 
-	fprintf(stderr, "Updating user %s (%s)\n", u->name, u->jid);
+	//fprintf(stderr, "Updating user %s (%s)\n", u->name, u->jid);
 
 	// Search first
 	bee_user_t *bu = bee_user_by_handle(wb->ic->bee, wb->ic, u->jid);
@@ -153,17 +161,33 @@ queue_dispatch(gpointer ptr, gint __attribute__((unused)) fd,
 	return 1;
 }
 
+static void
+wabee_init(account_t *acc)
+{
+	set_add(&acc->set, "config_dir", "~/.bitlbee/wa", NULL, acc);
+}
+
 static wabee_t *
 wabee_new(account_t *a)
 {
-	wabee_t *wb = g_new0(wabee_t, 1);
-	cb_t *cb = g_new0(cb_t, 1);
+	wordexp_t p;
+	wabee_t *wb;
+	cb_t *cb;
+	char *sf;
+
+	wb = g_new0(wabee_t, 1);
+	cb = g_new0(cb_t, 1);
 
 	cb->ptr = wb;
 	cb->priv_msg = cb_priv_msg;
 	cb->update_user = cb_update_user;
 
-	wb->wa = wa_init(cb);
+	sf = set_getstr(&a->set, "config_dir");
+	wordexp(sf, &p, WRDE_NOCMD);
+	wb->config_dir = p.we_wordv[0];
+	wb->run = 1;
+
+	wb->wa = wa_init(cb, wb->config_dir);
 	wb->ic = imcb_new(a);
 
 	wb->ic->proto_data = wb;
@@ -179,12 +203,16 @@ static void *
 wabee_loop(void *ptr)
 {
 	wabee_t *wb = (wabee_t *) ptr;
+	printf("s->path %s\n", wb->wa->s->path);
 	wa_login(wb->wa);
 
 	event_add(wb, EVENT_CONNECTED, NULL);
 
 	/*imcb_connected(wb->ic);*/
-	wa_loop(wb->wa);
+	while(wb->run)
+		wa_dispatch(wb->wa, 200);
+
+	wa_free(wb->wa);
 
 	return NULL;
 }
@@ -212,6 +240,14 @@ wabee_login(account_t *a)
 	wabee_run(wb);
 }
 
+void
+wabee_logout(struct im_connection *c)
+{
+	wabee_t *wb = c->proto_data;
+
+	wb->run = 0;
+}
+
 #ifdef BITLBEE_ABI_VERSION_CODE
 struct plugin_info *
 init_plugin_info(void)
@@ -235,7 +271,9 @@ G_MODULE_EXPORT void init_plugin(void)
 
 	ret->options = PRPL_OPT_NOOTR | PRPL_OPT_NO_PASSWORD;
 	ret->name = "whatsapp";
+	ret->init = wabee_init;
 	ret->login = wabee_login;
+	ret->logout = wabee_logout;
 	ret->buddy_msg = wabee_send_priv_msg;
 //	ret->get_info = wa_get_info;
 //	ret->add_buddy = wa_add_buddy;

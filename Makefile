@@ -12,7 +12,7 @@ wa.so: bee.o
 	$(CC) $(LIB_CFLAGS) $^ -o $@ $(LDLIBS)
 
 install: wa.so
-	cp wa.so /usr/lib/bitlbee/
+	cp -f wa.so /usr/lib/bitlbee/
 
 .PHONY: clean
 clean:
